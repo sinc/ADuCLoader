@@ -14,6 +14,9 @@
 #include <termios.h>
 #include <unistd.h>
 
+#define PBSTR "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+#define PBWIDTH 60
+
 typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 
@@ -27,6 +30,15 @@ typedef enum {
   LOAD_DATA_BLOCK = 0x45,
   ENABLE_BOOTLOAD = 0x46
 } commands;
+
+void printProgress(float percentage)
+{
+  int val = (int) (percentage * 100);
+  int lpad = (int) (percentage * PBWIDTH);
+  int rpad = PBWIDTH - lpad;
+  printf("\r%3d%% [%.*s%*s]", val, lpad, PBSTR, rpad, "");
+  fflush(stdout);
+}
 
 int set_interface_attribs (int fd, int speed, int parity)
 {
@@ -124,12 +136,18 @@ int send_command(int port, commands cmd, uint8_t *data, uint8_t data_size)
 
 int main(int argc, char *argv[])
 {
-  char buf[100];
+  char buf[100], c;
   if (argc > 1) {
     printf("Opening file %s\n", argv[1]);
-    //FILE *hex_file = fopen("./adbtldr/main.hex", "r");
     FILE *hex_file = fopen(argv[1], "r");
     if (hex_file != NULL) {
+      //get file lines count
+      uint32_t lines_count = 0;
+      while ((c = fgetc(hex_file)) != EOF) {
+        if (c == '\n')
+          lines_count++;
+      }
+      fseek(hex_file, 0, SEEK_SET);
       char *portname = "/dev/ttyUSB0";
       if (argc == 3) {
         portname = argv[2];
@@ -161,7 +179,7 @@ int main(int argc, char *argv[])
         if (buf[0] == ':') {
           int data_size = hex2int(buf + 1, 2);
           program_bytes += data_size;
-          uint8_t data[3+16] = { 0, hex2int(buf+3, 2), hex2int(buf+5, 2) }; //address and data. first always byte is zero?
+          uint8_t data[3+16] = { 0, hex2int(buf+3, 2), hex2int(buf+5, 2) };
           if (hex2int(buf+7, 2) == 0) { // check end of file
             uint8_t checksum = data_size+data[1]+data[2];
             for (int i = 0; i < data_size; i++) {
@@ -176,10 +194,11 @@ int main(int argc, char *argv[])
               printf("Error program at line %d\n", line);
               return EXIT_FAILURE;
             }
+            printProgress((float)(line+1)/(float)lines_count);
           }
         }
       }
-      printf("Writed %d bytes. \n", program_bytes);
+      printf("\nWrited %d bytes. \n", program_bytes);
       tmp[0] = 0; tmp[1] = 0; tmp[2] = 0;
       if (send_command(serial_port, RUN_CODE, tmp, 3) == EXIT_FAILURE) {
         printf("Error run user code.\n");
@@ -196,5 +215,6 @@ int main(int argc, char *argv[])
     printf("Usage: adbtldr [hex-file] [optional: serial port name (Default port is /dev/ttyUSB0)] \n");
     printf("Example: adbtldr ld.hex /dev/ttyUSB1\n");
   }
+
   return EXIT_SUCCESS;
 }
